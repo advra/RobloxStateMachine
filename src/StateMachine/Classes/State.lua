@@ -25,15 +25,21 @@ State.Name = "" :: string
     @prop Transitions string
     @within State
 
-    A reference for the transitions of this state. This is usually set while creating the state
+    A reference for the transitions of this state. This is usually set while creating the state.
+    Transitions can be defined with an optional priority. If nothing is defined then the default priority 
+    of 0 is used. In this case GoToRed is evaluated first before GoToBlue.
 
     ```lua
     local GoToBlue = require(script.Parent.Parent.Transitions.GoToBlue)
+    local GoToRed = require(script.Parent.Parent.Transitions.GoToRed)
 
     local State = StateMachine.State
 
     local Default = State.new("Default")
-    Default.Transitions = {GoToBlue}
+    Default.Transitions = {
+        {GoToBlue},
+        {GoToRed, 1} 
+        }
     ```
 ]=]
 State.Transitions = {} :: {Transition.Transition}
