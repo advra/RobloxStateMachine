@@ -13,6 +13,7 @@ local DUPLICATE_ERROR: string = "There cannot be more than 1 state by the same n
 local DATA_WARNING: string = "[Warning]: The data of this state machine is not a table. It will be converted to a table. Please do not set data to a non table object"
 local STATE_NOT_FOUND: string = "Attempt to %s, but there is no state by the name of %s"
 local WRONG_TRANSITION: string = "Attempt to add a transition that is not a transition"
+local PRIORITY_DEFAULT = 0 
 
 -- Used for quicker access to the directories
 local cacheDirectories = {} :: {[Instance]: {any}}
@@ -213,7 +214,20 @@ function StateMachine.new(initialState: string, states: {State}, initialData: {[
 
         stateClone._transitions = {}
 
-        for _, transition: Transition in stateClone.Transitions do
+		for _, transitionInfo in stateClone.Transitions do
+			local transition, priority
+			if type(transitionInfo) == "table" and transitionInfo.Type == Transition.Type then
+				transition = transitionInfo
+				priority = nil -- Default priority
+			elseif type(transitionInfo) == "table" and #transitionInfo == 2 and 
+				type(transitionInfo[1]) == "table" and transitionInfo[1].Type == Transition.Type and
+				type(transitionInfo[2]) == "number" then
+				transition = transitionInfo[1]
+				priority = transitionInfo[2]
+			else
+				error(WRONG_TRANSITION, 2)
+			end
+			
             if #transition.Name == 0 then
                 transition.Name = HttpService:GenerateGUID(false)
             end
@@ -233,6 +247,7 @@ function StateMachine.new(initialState: string, states: {State}, initialData: {[
                 error(WRONG_TRANSITION, 2)
             end
  
+			transitionClone.Priority = priority
             transitionClone.Data = stateClone.Data
             transitionClone._changeState = function(newState: string)
                 self:ChangeState(newState)
@@ -241,8 +256,10 @@ function StateMachine.new(initialState: string, states: {State}, initialData: {[
             stateClone._transitions[transitionClone.Name] = transitionClone
             task.spawn(transitionClone.OnInit, transitionClone, self.Data)
             self._trove:Add(transitionClone, "OnDestroy")
-        end
-
+		end
+		
+		stateClone._executionOrder = self:_BuildTransitionsExecutionOrder(stateClone.Transitions)
+		
         self._States[state.Name] = stateClone
         task.spawn(stateClone.OnInit, stateClone, self.Data)
         self._trove:Add(stateClone, "OnDestroy")
@@ -561,6 +578,62 @@ function StateMachine:_CheckTransitions(): ()
             break
         end
     end
+end
+
+--[=[
+    Sorts Transitions by Priority and build an execution order
+	If no priority is set then it is considered to be of PRIORITY_DEFAULT priority
+    If a state has two or more transitions with the same priority then they will be
+    executed in the order they were added
+
+    @private
+    
+    @param transitionsList {Transition} 
+
+    @return executionOrder {}
+]=]
+function StateMachine:_BuildTransitionsExecutionOrder(transitionsList: {}): {}
+	if not transitionsList then return {} end
+	
+	local prioritized = {}
+	local defaults = {}
+
+	for _, item in ipairs(transitionsList) do
+		local transition, priority
+		if type(item) == "table" and item.Type == Transition.Type then
+			transition = item
+			priority = item.Priority or PRIORITY_DEFAULT
+		elseif type(item) == "table" and #item == 2 then
+			transition = item[1]
+			priority = item[2] or PRIORITY_DEFAULT
+		else
+			error("Invalid transition format")
+		end
+
+		if priority ~= PRIORITY_DEFAULT then
+			prioritized[#prioritized + 1] = {
+				transition = transition,
+				priority = priority
+			}
+		else
+			defaults[#defaults + 1] = transition
+		end
+	end
+
+	table.sort(prioritized, function(a, b)
+		return a.priority > b.priority
+	end)
+
+	local executionOrder = {}
+
+	for _, item in ipairs(prioritized) do
+		executionOrder[#executionOrder + 1] = item.transition
+	end
+	for _, transition in ipairs(defaults) do
+		executionOrder[#executionOrder + 1] = transition
+	end
+
+	return executionOrder
 end
 
 --[=[
